@@ -308,8 +308,8 @@ class VisaStatusChecker:
             logger.error(f"Error filling form: {str(e)}")
             return False
             
-    def get_captcha_image(self):
-        """Get the CAPTCHA image as base64"""
+    def get_captcha_image(self, save_to_file=False):
+        """Get the CAPTCHA image as base64 and optionally save to file"""
         try:
             # The CAPTCHA image ID is c_status_ctl00_contentplaceholder1_defaultcaptcha_CaptchaImage
             captcha_element = self.page.locator('#c_status_ctl00_contentplaceholder1_defaultcaptcha_CaptchaImage')
@@ -325,6 +325,14 @@ class VisaStatusChecker:
             
             # Take screenshot of CAPTCHA
             captcha_bytes = captcha_element.screenshot()
+            
+            # Save to file if requested
+            if save_to_file:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"captcha_{self.session_id[:8]}_{timestamp}.png"
+                with open(filename, 'wb') as f:
+                    f.write(captcha_bytes)
+                logger.info(f"CAPTCHA image saved as {filename}")
             
             # Convert to base64
             captcha_base64 = base64.b64encode(captcha_bytes).decode('utf-8')
@@ -595,14 +603,14 @@ class VisaStatusChecker:
                 return {
                     'success': True,
                     'data': status_info,
-                    'screenshot': screenshot_base64
+                    # 'screenshot': screenshot_base64
                 }
             else:
                 logger.warning("Could not find status information in the popup")
                 return {
                     'success': False,
-                    'error': 'Could not find status information on the page',
-                    'screenshot': screenshot_base64
+                    'error': 'Could not find status information on the page'
+                    # 'screenshot': screenshot_base64
                 }
             
         except Exception as e:
@@ -699,8 +707,8 @@ def start_visa_check():
             visa_checker.close_browser()
             return jsonify({'success': False, 'error': 'Failed to fill form'}), 500
             
-        # Get CAPTCHA image
-        captcha_image = visa_checker.get_captcha_image()
+        # Get CAPTCHA image and save to file
+        captcha_image = visa_checker.get_captcha_image(save_to_file=True)
         if not captcha_image:
             with sessions_lock:
                 sessions.pop(session_id, None)
@@ -853,7 +861,8 @@ def check_visa_status():
                 
             # If no CAPTCHA solution provided, return the CAPTCHA image
             if not captcha_solution:
-                captcha_image = visa_checker.get_captcha_image()
+                # Get CAPTCHA image and save it to file
+                captcha_image = visa_checker.get_captcha_image(save_to_file=True)
                 if not captcha_image:
                     raise Exception('Failed to get CAPTCHA image')
                     
