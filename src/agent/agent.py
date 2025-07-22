@@ -37,7 +37,7 @@ class AgentDependencies(BaseModel):
     api_base_url: str = "http://localhost:5000/api"
 
 model = AnthropicModel(
-    'claude-3-7-sonnet-latest', provider=AnthropicProvider(api_key='XXYY')
+    'claude-3-7-sonnet-latest', provider=AnthropicProvider()
 )
 agent = Agent(
     model=model,
