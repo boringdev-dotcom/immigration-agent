@@ -1,0 +1,6 @@
+playwright
+flask
+flask-cors
+onnxruntime
+Pillow
+numpy 
