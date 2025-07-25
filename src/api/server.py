@@ -4,6 +4,7 @@ from playwright.sync_api import sync_playwright
 import base64
 import io
 import os
+import re
 import tempfile
 import time
 from datetime import datetime
@@ -482,7 +483,7 @@ class VisaStatusChecker:
             case_selectors = [
                 'text=/Application ID or Case Number:/i',
                 '*:has-text("Application ID or Case Number:")',
-                '*:has-text("AA00EILA2X")'
+                '*:has-text("Case Number:")'
             ]
             
             for selector in case_selectors:
@@ -493,9 +494,12 @@ class VisaStatusChecker:
                         # Extract case number from text like "Application ID or Case Number: AA00EILA2X"
                         if ':' in text:
                             case_num = text.split(':')[1].strip()
-                            status_info['case_number'] = case_num
-                            logger.info(f"Found case number: {case_num}")
-                        break
+                            # Remove any additional text after the case number (like newlines or extra text)
+                            case_num = case_num.split()[0] if case_num.split() else case_num
+                            if case_num:
+                                status_info['case_number'] = case_num
+                                logger.info(f"Found case number: {case_num}")
+                                break
                 except:
                     continue
             
@@ -582,21 +586,78 @@ class VisaStatusChecker:
                     continue
             
             if status_info:
-                # If we didn't find all fields, try to parse from the screenshot text
+                # If we didn't find all fields, try to parse from the full page text
                 if not status_info.get('case_number') or not status_info.get('case_created'):
-                    # Try to extract from the full text content
+                    # Try to extract from the full text content using regex patterns
                     try:
                         full_text = self.page.text_content('body')
                         lines = full_text.split('\n')
+                        
                         for line in lines:
                             line = line.strip()
-                            if 'AA00EILA2X' in line and not status_info.get('case_number'):
-                                status_info['case_number'] = 'AA00EILA2X'
-                            elif '08-Jul-2025' in line and not status_info.get('case_created'):
-                                status_info['case_created'] = '08-Jul-2025'
-                            elif 'Case Last Updated:' in line and not status_info.get('case_last_updated'):
-                                status_info['case_last_updated'] = line.split(':')[1].strip()
-                    except:
+                            
+                            # Look for case number pattern (typically alphanumeric)
+                            if not status_info.get('case_number'):
+                                # Try multiple patterns for case numbers
+                                case_patterns = [
+                                    r'\b[A-Z]{2}\d{2}[A-Z0-9]+\b',  # AA00EILA2X format
+                                    r'\b[A-Z]{3}\d{10}\b',          # ABC1234567890 format
+                                    r'\b\d{13}\b',                  # 13-digit numeric
+                                    r'\b[A-Z]{2}\d{8,12}\b',        # AA12345678 format
+                                    r'\b[A-Z0-9]{8,15}\b'           # General alphanumeric 8-15 chars
+                                ]
+                                
+                                for pattern in case_patterns:
+                                    case_match = re.search(pattern, line)
+                                    if case_match:
+                                        # Additional validation - should not be all numbers if less than 8 digits
+                                        candidate = case_match.group()
+                                        if len(candidate) >= 8 or not candidate.isdigit():
+                                            status_info['case_number'] = candidate
+                                            logger.info(f"Found case number via regex: {candidate}")
+                                            break
+                            
+                            # Look for date patterns
+                            if not status_info.get('case_created'):
+                                # Multiple date patterns to try
+                                date_patterns = [
+                                    r'\b\d{1,2}-[A-Za-z]{3}-\d{4}\b',  # 08-Jul-2025
+                                    r'\b\d{1,2}/\d{1,2}/\d{4}\b',      # 08/07/2025 or 7/8/2025
+                                    r'\b\d{4}-\d{1,2}-\d{1,2}\b',      # 2025-07-08
+                                    r'\b[A-Za-z]{3}\s+\d{1,2},\s+\d{4}\b'  # Jul 08, 2025
+                                ]
+                                
+                                for pattern in date_patterns:
+                                    date_match = re.search(pattern, line)
+                                    if date_match and ('created' in line.lower() or 'case' in line.lower()):
+                                        status_info['case_created'] = date_match.group()
+                                        logger.info(f"Found case created date via regex: {date_match.group()}")
+                                        break
+                            
+                            # Look for last updated date
+                            if not status_info.get('case_last_updated'):
+                                update_keywords = ['Case Last Updated:', 'Last Updated:', 'Updated:']
+                                for keyword in update_keywords:
+                                    if keyword in line:
+                                        date_part = line.split(keyword)[1].strip()
+                                        # Try multiple date patterns
+                                        date_patterns = [
+                                            r'\b\d{1,2}-[A-Za-z]{3}-\d{4}\b',  # 08-Jul-2025
+                                            r'\b\d{1,2}/\d{1,2}/\d{4}\b',      # 08/07/2025
+                                            r'\b\d{4}-\d{1,2}-\d{1,2}\b',      # 2025-07-08
+                                            r'\b[A-Za-z]{3}\s+\d{1,2},\s+\d{4}\b'  # Jul 08, 2025
+                                        ]
+                                        
+                                        for pattern in date_patterns:
+                                            date_match = re.search(pattern, date_part)
+                                            if date_match:
+                                                status_info['case_last_updated'] = date_match.group()
+                                                logger.info(f"Found case last updated date: {date_match.group()}")
+                                                break
+                                        if status_info.get('case_last_updated'):
+                                            break
+                    except Exception as e:
+                        logger.warning(f"Error in fallback text parsing: {e}")
                         pass
                 
                 logger.info(f"Successfully extracted status from popup: {status_info}")
